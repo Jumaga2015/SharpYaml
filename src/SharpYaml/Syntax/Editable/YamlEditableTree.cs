@@ -229,7 +229,17 @@ public sealed class YamlEditableTree
         private YamlEditableMap ParseMap(string parentIndent)
         {
             var map = new YamlEditableMap();
+            // null = "not yet committed": true until a key with an EXPLICIT indent (its own
+            // newline) is seen. A key with no explicit indent shares its line with whatever
+            // introduces this map (e.g. "- Name: x" — "Name" follows "-" on the same line, no
+            // newline before it, so SplitIndent returns null and its indent is only a fallback,
+            // not a real measurement). Committing mapIndent from that fallback would wrongly cut
+            // the map at the very next key, whose real indent (its own line, e.g. "  Port: y"
+            // aligned under "Name") is almost always different from the fallback. So an
+            // uncommitted mapIndent accepts any indent without ending the map; only once a real
+            // (explicit) indent is seen does mapIndent lock in and start rejecting mismatches.
             string? mapIndent = null;
+            var mapIndentCommitted = false;
 
             while (_position < _significant.Count && Current.Kind == YamlSyntaxKind.Scalar && IsMapKeyAhead())
             {
@@ -237,17 +247,19 @@ public sealed class YamlEditableTree
                 var (indentOrNull, keyLeading) = SplitIndent(rawLeading);
                 var indent = indentOrNull ?? parentIndent;
 
-                if (mapIndent is null)
-                {
-                    mapIndent = indent;
-                }
-                else if (indent != mapIndent)
+                if (mapIndentCommitted && indent != mapIndent)
                 {
                     // A dedent back to (or below) the parent level ends this mapping; the caller
                     // continues parsing at its own level from the current position. Restore the
                     // trivia exactly as read, so the caller's own SplitIndent sees the full run.
                     UndoLeadingTrivia(rawLeading);
                     break;
+                }
+
+                if (indentOrNull is not null)
+                {
+                    mapIndent = indent;
+                    mapIndentCommitted = true;
                 }
 
                 var keyScalarToken = Take();
@@ -262,7 +274,16 @@ public sealed class YamlEditableTree
                 var separatorTrivia = nestedBlockAhead ? null : TakeLeadingTrivia();
                 var valueNode = ParseValue(indent);
 
-                var entry = new YamlEditableMapEntry(keyScalarToken.Text, valueNode, indent)
+                // A key with no explicit indent (indentOrNull is null) shares its line with the
+                // construct that introduces this map (e.g. the "-" of a YamlEditableListEntry,
+                // whose own WriteCore already writes "- "). WriteCore below unconditionally
+                // writes Entry.Indent before the key, so this entry's stored Indent must be ""
+                // in that case — using the inherited "indent" (parentIndent) here would duplicate
+                // the whitespace already written by the parent on reserialize (confirmed by a
+                // round-trip test: "- Name: x" became "-   Name: x", invalid YAML once the extra
+                // indent stacked with the ListEntry's own separator).
+                var entryIndent = indentOrNull ?? string.Empty;
+                var entry = new YamlEditableMapEntry(keyScalarToken.Text, valueNode, entryIndent)
                 {
                     LeadingTrivia = keyLeading,
                     TrailingTrivia = separatorTrivia,
