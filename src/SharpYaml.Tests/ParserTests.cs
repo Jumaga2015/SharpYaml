@@ -452,6 +452,22 @@ namespace SharpYaml.Tests
                 }
             }
         }
+
+        [TestMethod]
+        public void ParserConstructorOverloads_InitializeCorrectly()
+        {
+            var buffer1 = new StringLookAheadBuffer("key: value");
+            var parser1 = new Parser<StringLookAheadBuffer>(buffer1);
+            Assert.IsNotNull(parser1);
+
+            var buffer2 = new StringLookAheadBuffer("key: value");
+            var parser2 = new Parser<StringLookAheadBuffer>(buffer2, 32);
+            Assert.IsNotNull(parser2);
+
+            var buffer3 = new StringLookAheadBuffer("key: value");
+            var parser3 = new Parser<StringLookAheadBuffer>(buffer3, 32, "source.yaml");
+            Assert.IsNotNull(parser3);
+        }
     }
 }
 

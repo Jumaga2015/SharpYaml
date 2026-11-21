@@ -289,12 +289,31 @@ public class Parser<TBuffer> : IParser, Events.IReusedEventSource where TBuffer 
     }
 
     /// <summary>
+    /// Initializes a new instance of the <see cref="IParser"/> class with the default maximum nesting depth.
+    /// </summary>
+    /// <param name="buffer">The input where the YAML stream is to be read.</param>
+    public Parser(TBuffer buffer)
+        : this(buffer, YamlDepthHelper.DefaultMaxDepth, null)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="IParser"/> class with a configurable maximum nesting depth.
+    /// </summary>
+    /// <param name="buffer">The input where the YAML stream is to be read.</param>
+    /// <param name="maxDepth">The maximum allowed nesting depth for mappings and sequences.</param>
+    public Parser(TBuffer buffer, int maxDepth)
+        : this(buffer, maxDepth, null)
+    {
+    }
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="IParser"/> class.
     /// </summary>
     /// <param name="buffer">The input where the YAML stream is to be read.</param>
     /// <param name="maxDepth">The maximum allowed nesting depth for mappings and sequences.</param>
     /// <param name="sourceName">The optional source name used when reporting depth-limit failures.</param>
-    public Parser(TBuffer buffer, int maxDepth = YamlDepthHelper.DefaultMaxDepth, string? sourceName = null)
+    public Parser(TBuffer buffer, int maxDepth, string? sourceName)
     {
         ArgumentGuard.ThrowIfNull(buffer);
         _maxDepth = YamlDepthHelper.GetEffectiveMaxDepth(maxDepth, nameof(maxDepth));
