@@ -487,9 +487,20 @@ public class YamlEditableTreeTests
     [DataRow("A: {x: 1}\n")]
     [DataRow("A: [\n  ]\n")]
     [DataRow("A: [ # one\n  ]\n")]
-    public void Parse_FlowCollectionWithContentOrOnSeveralLines_ThrowsNotSupportedException(string yaml)
+    public void Parse_FlowCollectionWithContent_RoundTripsUnchanged(string yaml)
     {
-        Assert.ThrowsExactly<NotSupportedException>(() => YamlEditableTree.Parse(yaml));
+        var tree = YamlEditableTree.Parse(yaml);
+
+        Assert.AreEqual(yaml, tree.Serialize());
+    }
+
+    [TestMethod]
+    public void Parse_FlowCollectionsInBlockDocument_RoundTripUnchanged()
+    {
+        const string yaml = "alineacion: [left, center]\nitems:\n  - { heading: { level: 1 } }\n  - [a,\n     b]\nlast: 1\n";
+        var tree = YamlEditableTree.Parse(yaml);
+
+        Assert.AreEqual(yaml, tree.Serialize());
     }
 
     [TestMethod]
@@ -560,10 +571,40 @@ public class YamlEditableTreeTests
     }
 
     [TestMethod]
-    public void Parse_FlowStyleMapping_ThrowsNotSupportedException()
+    public void Parse_FlowStyleMapping_RoundTripsUnchanged()
     {
         const string yaml = "flow: { a: 1, b: 2 }\n";
-        Assert.ThrowsExactly<NotSupportedException>(() => YamlEditableTree.Parse(yaml));
+        var tree = YamlEditableTree.Parse(yaml);
+
+        Assert.AreEqual(yaml, tree.Serialize());
+    }
+
+    [TestMethod]
+    public void Parse_FlowCollectionWithContent_IsAFlowCollectionNodeWithItsText()
+    {
+        var tree = YamlEditableTree.Parse("alineacion: [left, center]\n");
+
+        Assert.AreEqual("[left, center]", ((YamlEditableFlowCollection)RootOf(tree).GetValue("alineacion")!).Text);
+    }
+
+    [TestMethod]
+    public void SetValue_ScalarNextToFlowCollection_KeepsTheFlowText()
+    {
+        var tree = YamlEditableTree.Parse("alineacion: [left, center]\nlast: 1\n");
+
+        ((YamlEditableScalar)RootOf(tree).GetValue("last")!).Text = "2";
+
+        AssertEdited("alineacion: [left, center]\nlast: 2\n", tree);
+    }
+
+    [TestMethod]
+    public void SetValue_ReplacesFlowCollectionAsAWhole()
+    {
+        var tree = YamlEditableTree.Parse("alineacion: [left, center]\nlast: 1\n");
+
+        RootOf(tree).SetValue("alineacion", new YamlEditableScalar("right"));
+
+        AssertEdited("alineacion: right\nlast: 1\n", tree);
     }
 
     [TestMethod]

@@ -124,6 +124,9 @@ internal sealed class YamlEditableTextWriter : StringWriter
 
                 _values[scalar] = value;
                 break;
+            case YamlEditableFlowCollection flow:
+                reader.ExpectWritten(_spans[flow], asScalar: false);
+                break;
             case YamlEditableMapping { Entries.Count: 0 } map:
                 reader.ExpectWritten(_spans[map], asScalar: false);
                 break;

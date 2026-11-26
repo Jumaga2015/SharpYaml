@@ -15,8 +15,9 @@ namespace SharpYaml.Syntax.Editable;
 /// maps, lists and scalars with attached comments, in the spirit of Tomlyn.Syntax.DocumentSyntax.
 /// Scope is intentionally bounded to editing hand-written configuration files: block-style maps
 /// and sequences, plain/quoted/block scalars, "#" comments, keys and list items without a value
-/// ("key:", "-"), and empty flow collections ("[]", "{}"), the only form of an empty map or list.
-/// Flow style with content, explicit keys ("?"), spaces between a key and its ":", block scalars with the keep
+/// ("key:", "-"), empty flow collections ("[]", "{}"), and flow collections with content ("[a, b]", "{ k: v }"),
+/// which keep their verbatim text in a <see cref="YamlEditableFlowCollection"/> and are replaced whole, not edited inside.
+/// Explicit keys ("?"), spaces between a key and its ":", block scalars with the keep
 /// indicator or an indentation indicator ("|+", "|2"), anchors, aliases, tags, directives and document markers
 /// ("---", "...") are not supported and cause <see cref="Parse"/> to throw <see cref="NotSupportedException"/>.
 /// </summary>
@@ -72,8 +73,8 @@ public sealed class YamlEditableTree
     /// <exception cref="ArgumentNullException"><paramref name="yaml"/> is <see langword="null"/>.</exception>
     /// <exception cref="YamlException"><paramref name="yaml"/> is not valid YAML.</exception>
     /// <exception cref="NotSupportedException">
-    /// The document uses a construct outside the bounded scope of this editable tree (flow
-    /// style with content, explicit keys, spaces before the ":" of a key, block scalars with the keep indicator or an
+    /// The document uses a construct outside the bounded scope of this editable tree (explicit keys,
+    /// spaces before the ":" of a key, block scalars with the keep indicator or an
     /// indentation indicator, anchors, aliases, tags, directives, or document markers such as
     /// "---" and "...", which also covers multiple documents), or the tree cannot write its text
     /// back exactly.
@@ -83,7 +84,7 @@ public sealed class YamlEditableTree
         ArgumentGuard.ThrowIfNull(yaml);
 
         var syntaxTree = YamlSyntaxTree.Parse(yaml);
-        var builder = new Builder(syntaxTree.Tokens);
+        var builder = new Builder(syntaxTree.Tokens, yaml);
         var root = builder.BuildRoot();
         var lineBreak = yaml.IndexOfAny(['\r', '\n']);
         root.DocumentNewLine = lineBreak < 0 ? null
@@ -185,7 +186,7 @@ public sealed class YamlEditableTree
         string readHeader;
         try
         {
-            var builder = new Builder(written.Tokens);
+            var builder = new Builder(written.Tokens, written.Text);
             var root = builder.BuildRoot();
             read = GetComments(root, builder.TrailingTrivia, out readHeader);
         }
@@ -419,15 +420,14 @@ public sealed class YamlEditableTree
         /// </summary>
         public List<YamlEditableTrivia>? TrailingTrivia { get; private set; }
 
-        public Builder(IReadOnlyList<YamlSyntaxToken> tokens)
+        public Builder(IReadOnlyList<YamlSyntaxToken> tokens, string source)
         {
             _significant = [];
             _leadingTriviaByTokenIndex = [];
             _endOfLineByTokenIndex = [];
 
             var pendingTrivia = new List<YamlEditableTrivia>();
-            var openFlowCollection = false;
-            foreach (var token in tokens)
+            foreach (var token in CollapseFlowCollections(tokens, source))
             {
                 if (IsTrivia(token.Kind))
                 {
@@ -458,49 +458,17 @@ public sealed class YamlEditableTree
                     continue;
                 }
 
-                if (openFlowCollection)
-                {
-                    // Only an empty flow collection is supported: its end must follow its start, with at most
-                    // spaces between them ("[ ]").
-                    var start = _significant[_significant.Count - 1];
-                    var closes = pendingTrivia.TrueForAll(t => t.Kind == YamlEditableTriviaKind.Whitespace)
-                        && (token.Kind, start.Kind) is (YamlSyntaxKind.FlowSequenceEnd, YamlSyntaxKind.FlowSequenceStart)
-                            or (YamlSyntaxKind.FlowMappingEnd, YamlSyntaxKind.FlowMappingStart);
-                    if (!closes)
-                    {
-                        throw UnsupportedFlowCollection(start.Kind);
-                    }
-
-                    // The start token stands for the whole "[]" or "{}", with the spaces between them.
-                    _significant[_significant.Count - 1] = new YamlSyntaxToken(
-                        start.Kind,
-                        new YamlSourceSpan(start.Span.Start, token.Span.End),
-                        start.Text + string.Concat(pendingTrivia.Select(t => t.Text)) + token.Text);
-                    pendingTrivia = [];
-                    openFlowCollection = false;
-                    continue;
-                }
-
-                if (token.Kind is YamlSyntaxKind.FlowSequenceStart or YamlSyntaxKind.FlowMappingStart)
-                {
-                    openFlowCollection = true;
-                }
-                else if (IsUnsupported(token.Kind))
+                if (IsUnsupported(token.Kind))
                 {
                     throw new NotSupportedException(
                         $"YamlEditableTree does not support '{token.Kind}'. Only block maps, block " +
-                        "sequences, empty flow collections (\"[]\", \"{}\"), scalars and comments are supported.");
+                        "sequences, flow collections, scalars and comments are supported.");
                 }
 
                 AttachTrivia(pendingTrivia, _significant.Count);
                 pendingTrivia = [];
 
                 _significant.Add(token);
-            }
-
-            if (openFlowCollection)
-            {
-                throw UnsupportedFlowCollection(_significant[_significant.Count - 1].Kind);
             }
 
             if (pendingTrivia.Count > 0)
@@ -595,9 +563,87 @@ public sealed class YamlEditableTree
             }
         }
 
-        private static NotSupportedException UnsupportedFlowCollection(YamlSyntaxKind start) => new(
-            $"YamlEditableTree does not support '{start}' with content. Only empty flow collections " +
-            "(\"[]\", \"{}\") are supported.");
+        /// <summary>
+        /// Merges every flow collection ("[...]" or "{...}", possibly over several lines) into one scalar token whose text
+        /// is its verbatim source, so the builder reads it as one value. The brackets are zero-width tokens placed at the
+        /// bracket, so the text comes from <paramref name="source"/> by span. A start token with no matching end is kept
+        /// as it is, and the builder reports it.
+        /// </summary>
+        private static List<YamlSyntaxToken> CollapseFlowCollections(IReadOnlyList<YamlSyntaxToken> tokens, string source)
+        {
+            var collapsed = new List<YamlSyntaxToken>(tokens.Count);
+            for (var i = 0; i < tokens.Count; i++)
+            {
+                var token = tokens[i];
+                if (token.Kind is not (YamlSyntaxKind.FlowSequenceStart or YamlSyntaxKind.FlowMappingStart))
+                {
+                    collapsed.Add(token);
+                    continue;
+                }
+
+                var end = FindFlowEnd(tokens, i);
+                if (end < 0)
+                {
+                    collapsed.Add(token);
+                    continue;
+                }
+
+                // The closing token is zero-width and sits at its "]" or "}", so the end is one character after it.
+                var startIndex = token.Span.Start.Index;
+                var endIndex = tokens[end].Span.Start.Index + 1;
+                var span = new YamlSourceSpan(token.Span.Start, tokens[end].Span.End);
+                collapsed.Add(new YamlSyntaxToken(YamlSyntaxKind.Scalar, span, source.Substring(startIndex, endIndex - startIndex)));
+                i = end;
+            }
+
+            return collapsed;
+        }
+
+        /// <summary>Index of the token that closes the flow collection opened at <paramref name="start"/>, or -1.</summary>
+        private static int FindFlowEnd(IReadOnlyList<YamlSyntaxToken> tokens, int start)
+        {
+            var depth = 0;
+            for (var j = start; j < tokens.Count; j++)
+            {
+                if (tokens[j].Kind is YamlSyntaxKind.FlowSequenceStart or YamlSyntaxKind.FlowMappingStart)
+                {
+                    depth++;
+                }
+                else if (tokens[j].Kind is YamlSyntaxKind.FlowSequenceEnd or YamlSyntaxKind.FlowMappingEnd)
+                {
+                    depth--;
+                    if (depth == 0)
+                    {
+                        return j;
+                    }
+                }
+            }
+
+            return -1;
+        }
+
+        /// <summary>
+        /// The node for a scalar token, from its verbatim text. An empty collection ("[ ]", "{}") keeps its text as
+        /// its empty flow text. Any other collection keeps its text in a <see cref="YamlEditableFlowCollection"/>. A plain
+        /// or quoted scalar never starts with a bracket or a brace, so the text tells the cases apart.
+        /// </summary>
+        private static YamlEditableNode ScalarNode(string text)
+        {
+            if (IsEmptyFlowCollection(text, '[', ']'))
+            {
+                return new YamlEditableSequence { EmptyFlowText = text };
+            }
+
+            if (IsEmptyFlowCollection(text, '{', '}'))
+            {
+                return new YamlEditableMapping { EmptyFlowText = text };
+            }
+
+            return text.Length > 0 && text[0] is '[' or '{' ? new YamlEditableFlowCollection(text) : new YamlEditableScalar(text);
+        }
+
+        private static bool IsEmptyFlowCollection(string text, char open, char close) =>
+            text.Length >= 2 && text[0] == open && text[^1] == close && text.Substring(1, text.Length - 2).Trim(' ').Length == 0;
 
         /// <summary>
         /// Attaches the trivia found before the significant token at <paramref name="nextIndex"/>:
@@ -710,16 +756,6 @@ public sealed class YamlEditableTree
                 return ParseList(parentIndent);
             }
 
-            if (Current.Kind == YamlSyntaxKind.FlowSequenceStart)
-            {
-                return new YamlEditableSequence { EmptyFlowText = Take().Text };
-            }
-
-            if (Current.Kind == YamlSyntaxKind.FlowMappingStart)
-            {
-                return new YamlEditableMapping { EmptyFlowText = Take().Text };
-            }
-
             if (Current.Kind == YamlSyntaxKind.Scalar && IsMapKeyAhead())
             {
                 return ParseMap(parentIndent);
@@ -728,7 +764,7 @@ public sealed class YamlEditableTree
             if (Current.Kind == YamlSyntaxKind.Scalar)
             {
                 var token = Take();
-                return new YamlEditableScalar(token.Text);
+                return ScalarNode(token.Text);
             }
 
             throw new NotSupportedException(
