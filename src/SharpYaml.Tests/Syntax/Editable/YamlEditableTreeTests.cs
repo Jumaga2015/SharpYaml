@@ -608,6 +608,65 @@ public class YamlEditableTreeTests
     }
 
     [TestMethod]
+    [DataRow("A: [&a x, *a]\n")]
+    [DataRow("A: [!!str x]\n")]
+    [DataRow("A: { k: &a x }\n")]
+    public void Parse_AnchorAliasOrTagInsideFlowCollection_ThrowsNotSupportedException(string yaml)
+    {
+        Assert.ThrowsExactly<NotSupportedException>(() => YamlEditableTree.Parse(yaml));
+    }
+
+    [TestMethod]
+    [DataRow("[a, b]: x\n")]
+    [DataRow("{ a: 1 }: x\n")]
+    [DataRow("m:\n  [a, b]: x\n")]
+    public void Parse_FlowCollectionAsKey_ThrowsNotSupportedException(string yaml)
+    {
+        Assert.ThrowsExactly<NotSupportedException>(() => YamlEditableTree.Parse(yaml));
+    }
+
+    [TestMethod]
+    public void SetValue_NextToFlowCollectionWithEndOfLineComment_KeepsTheComment()
+    {
+        var tree = YamlEditableTree.Parse("a: [x, y] # c\nb: 1\n");
+
+        ((YamlEditableScalar)RootOf(tree).GetValue("b")!).Text = "2";
+
+        AssertEdited("a: [x, y] # c\nb: 2\n", tree);
+    }
+
+    [TestMethod]
+    [DataRow("[a, b]\n")]
+    [DataRow("{ a: 1 }\n")]
+    public void Parse_FlowCollectionAtTheRoot_IsAFlowCollectionNode(string yaml)
+    {
+        var tree = YamlEditableTree.Parse(yaml);
+
+        Assert.IsInstanceOfType<YamlEditableFlowCollection>(tree.Root);
+        Assert.AreEqual(yaml, tree.Serialize());
+    }
+
+    [TestMethod]
+    public void Parse_FlowCollectionOverSeveralCrLfLines_RoundTripsUnchanged()
+    {
+        const string yaml = "a: [x,\r\n  y]\r\nb: 1\r\n";
+        var tree = YamlEditableTree.Parse(yaml);
+
+        Assert.AreEqual("[x,\r\n  y]", ((YamlEditableFlowCollection)RootOf(tree).GetValue("a")!).Text);
+        Assert.AreEqual(yaml, tree.Serialize());
+    }
+
+    [TestMethod]
+    [DataRow("A: [\n  ]\n")]
+    [DataRow("A: [ # one\n  ]\n")]
+    public void Parse_EmptyFlowCollectionWithLineBreakOrComment_IsAFlowCollectionNode(string yaml)
+    {
+        var tree = YamlEditableTree.Parse(yaml);
+
+        Assert.IsInstanceOfType<YamlEditableFlowCollection>(RootOf(tree).GetValue("A"));
+    }
+
+    [TestMethod]
     public void Parse_Anchor_ThrowsNotSupportedException()
     {
         const string yaml = "node: &n1 value\nalias: *n1\n";

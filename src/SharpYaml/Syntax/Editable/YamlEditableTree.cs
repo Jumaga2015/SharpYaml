@@ -17,8 +17,8 @@ namespace SharpYaml.Syntax.Editable;
 /// and sequences, plain/quoted/block scalars, "#" comments, keys and list items without a value
 /// ("key:", "-"), empty flow collections ("[]", "{}"), and flow collections with content ("[a, b]", "{ k: v }"),
 /// which keep their verbatim text in a <see cref="YamlEditableFlowCollection"/> and are replaced whole, not edited inside.
-/// Explicit keys ("?"), spaces between a key and its ":", block scalars with the keep
-/// indicator or an indentation indicator ("|+", "|2"), anchors, aliases, tags, directives and document markers
+/// A flow collection as a key, explicit keys ("?"), spaces between a key and its ":", block scalars with the keep
+/// indicator or an indentation indicator ("|+", "|2"), anchors, aliases, tags (also inside a flow collection), directives and document markers
 /// ("---", "...") are not supported and cause <see cref="Parse"/> to throw <see cref="NotSupportedException"/>.
 /// </summary>
 /// <remarks>
@@ -73,9 +73,9 @@ public sealed class YamlEditableTree
     /// <exception cref="ArgumentNullException"><paramref name="yaml"/> is <see langword="null"/>.</exception>
     /// <exception cref="YamlException"><paramref name="yaml"/> is not valid YAML.</exception>
     /// <exception cref="NotSupportedException">
-    /// The document uses a construct outside the bounded scope of this editable tree (explicit keys,
-    /// spaces before the ":" of a key, block scalars with the keep indicator or an
-    /// indentation indicator, anchors, aliases, tags, directives, or document markers such as
+    /// The document uses a construct outside the bounded scope of this editable tree (a flow collection as a key,
+    /// explicit keys, spaces before the ":" of a key, block scalars with the keep indicator or an
+    /// indentation indicator, anchors, aliases, tags (also inside a flow collection), directives, or document markers such as
     /// "---" and "...", which also covers multiple documents), or the tree cannot write its text
     /// back exactly.
     /// </exception>
@@ -588,6 +588,21 @@ public sealed class YamlEditableTree
                     continue;
                 }
 
+                // The collection keeps its text, but the scope of the tree is the same inside it.
+                for (var j = i + 1; j < end; j++)
+                {
+                    if (tokens[j].Kind is YamlSyntaxKind.Anchor or YamlSyntaxKind.AnchorAlias or YamlSyntaxKind.Tag)
+                    {
+                        throw new NotSupportedException(
+                            $"YamlEditableTree does not support '{tokens[j].Kind}', also inside a flow collection.");
+                    }
+                }
+
+                if (IsKey(tokens, end))
+                {
+                    throw new NotSupportedException("YamlEditableTree does not support a flow collection as a key.");
+                }
+
                 // The closing token is zero-width and sits at its "]" or "}", so the end is one character after it.
                 var startIndex = token.Span.Start.Index;
                 var endIndex = tokens[end].Span.Start.Index + 1;
@@ -597,6 +612,20 @@ public sealed class YamlEditableTree
             }
 
             return collapsed;
+        }
+
+        /// <summary>Whether the first token after the trivia that follows <paramref name="end"/> is the ":" of a key.</summary>
+        private static bool IsKey(IReadOnlyList<YamlSyntaxToken> tokens, int end)
+        {
+            for (var j = end + 1; j < tokens.Count; j++)
+            {
+                if (!IsTrivia(tokens[j].Kind))
+                {
+                    return tokens[j].Kind == YamlSyntaxKind.Value;
+                }
+            }
+
+            return false;
         }
 
         /// <summary>Index of the token that closes the flow collection opened at <paramref name="start"/>, or -1.</summary>

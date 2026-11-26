@@ -10,7 +10,8 @@ namespace SharpYaml.Syntax.Editable;
 /// <summary>
 /// A flow collection with content, e.g. the "[left, center]" in "key: [left, center]". The node keeps the verbatim
 /// text and does not model its entries: read them with a YAML parser over <see cref="Text"/>. An empty collection
-/// ("[]" or "{}") is a <see cref="YamlEditableSequence"/> or a <see cref="YamlEditableMapping"/> instead.
+/// with only spaces inside ("[]", "{ }") is a <see cref="YamlEditableSequence"/> or a <see cref="YamlEditableMapping"/>
+/// instead; one with a line break or a comment inside is a <see cref="YamlEditableFlowCollection"/>.
 /// </summary>
 public sealed class YamlEditableFlowCollection : YamlEditableNode
 {

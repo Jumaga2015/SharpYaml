@@ -169,11 +169,12 @@ sequence writes `{}` or `[]`, also at the root, and adding an entry to it writes
 
 A flow collection with content (`[left, center]`, `{ a: 1 }`, also over several lines) is a
 `YamlEditableFlowCollection`. It keeps its verbatim text, so it is written back unchanged, and it is
-replaced as a whole, not edited inside.
+replaced as a whole, not edited inside. An empty collection with a line break or a comment inside
+(`[ # none` on one line, `]` on the next) is also a `YamlEditableFlowCollection`.
 
-`YamlEditableTree.Parse` throws `NotSupportedException` for explicit keys (`?`), spaces between a key and its `:` (`a : b`), block scalars with the keep
+`YamlEditableTree.Parse` throws `NotSupportedException` for a flow collection as a key (`[a, b]: x`), explicit keys (`?`), spaces between a key and its `:` (`a : b`), block scalars with the keep
 indicator or an indentation indicator (`|+`, `|2`, whose value depends on the lines around them),
-anchors, aliases, tags, directives, document markers (`---`, `...`, so also for a stream of several
+anchors, aliases, tags (also inside a flow collection), directives, document markers (`---`, `...`, so also for a stream of several
 documents), a mapping with the same key twice, and any document whose text the tree would not write
 back exactly (a byte order mark is kept), so a document that uses them is never edited partially.
 
