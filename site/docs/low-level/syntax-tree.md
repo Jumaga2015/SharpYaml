@@ -167,8 +167,11 @@ empty mappings and sequences. An empty mapping or sequence has no block form: it
 written as `{}` or `[]` (also with spaces inside), so removing the last entry of a mapping or a
 sequence writes `{}` or `[]`, also at the root, and adding an entry to it writes it as a block again.
 
-`YamlEditableTree.Parse` throws `NotSupportedException` for flow style with content or on several
-lines, explicit keys (`?`), spaces between a key and its `:` (`a : b`), block scalars with the keep
+A flow collection with content (`[left, center]`, `{ a: 1 }`, also over several lines) is a
+`YamlEditableFlowCollection`. It keeps its verbatim text, so it is written back unchanged, and it is
+replaced as a whole, not edited inside.
+
+`YamlEditableTree.Parse` throws `NotSupportedException` for explicit keys (`?`), spaces between a key and its `:` (`a : b`), block scalars with the keep
 indicator or an indentation indicator (`|+`, `|2`, whose value depends on the lines around them),
 anchors, aliases, tags, directives, document markers (`---`, `...`, so also for a stream of several
 documents), a mapping with the same key twice, and any document whose text the tree would not write

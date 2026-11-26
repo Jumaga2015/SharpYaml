@@ -33,4 +33,9 @@ public enum YamlEditableKind
     /// A plain, quoted or block scalar (<see cref="YamlEditableScalar"/>).
     /// </summary>
     Scalar,
+
+    /// <summary>
+    /// A flow collection with content, e.g. "[left, center]" (<see cref="YamlEditableFlowCollection"/>).
+    /// </summary>
+    FlowCollection,
 }
